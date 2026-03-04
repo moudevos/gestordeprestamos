@@ -1,0 +1,10 @@
+{
+  "name": "Gestor de Prestamos",
+  "short_name": "Prestamos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#2f6fed",
+  "icons": []
+}
+

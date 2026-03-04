@@ -1,0 +1,18 @@
+# Variables de Entorno
+
+## Web (`apps/web`)
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_VAPID_PUBLIC_KEY`
+
+## Worker (`apps/worker`)
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `RESEND_API_KEY`
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `JOB_TOKEN`
+- `APP_BASE_URL`
+

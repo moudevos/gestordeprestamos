@@ -1,0 +1,12 @@
+{
+  "name": "gestor-prestamos",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.5.2",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @gestor-prestamos/web --filter @gestor-prestamos/worker dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  }
+}
+

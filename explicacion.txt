@@ -1,0 +1,509 @@
+EXPLICACION DE LA BASE DE DATOS
+
+1. RESUMEN GENERAL
+
+Este proyecto usa una base de datos SQL relacional sobre PostgreSQL, administrada por Supabase.
+
+No es NoSQL.
+No usa documentos tipo MongoDB.
+No usa una sola tabla gigante.
+
+La estructura esta pensada para:
+
+- separar organizaciones (multi-tenant)
+- mantener integridad de datos con claves foraneas
+- auditar acciones criticas
+- soportar calculos de prestamos, cuotas, pagos, mora y refinanciacion
+- escalar de forma razonable para un MVP y una version productiva pequena o mediana
+
+
+2. TIPO DE BASE DE DATOS
+
+Tipo: SQL relacional
+Motor: PostgreSQL
+Proveedor/plataforma: Supabase
+
+Por que SQL:
+
+- el dominio de prestamos tiene relaciones claras entre entidades
+- necesitamos consistencia fuerte en pagos y saldos
+- necesitamos transacciones y funciones SQL
+- necesitamos restricciones de integridad
+- necesitamos RLS (Row Level Security) por organizacion
+
+Beneficios de usar SQL aqui:
+
+- evita inconsistencias entre pagos, cuotas y saldos
+- permite joins y reportes financieros mas confiables
+- facilita reglas de negocio dentro de la BD con RPC
+- es mejor para trazabilidad y auditoria
+
+Desventajas:
+
+- modelar cambios radicales es menos flexible que en NoSQL
+- requiere mas disciplina de esquema
+- la logica SQL puede volverse compleja si se carga demasiado en la BD
+
+
+3. NIVEL DE NORMALIZACION
+
+La base esta mayormente normalizada.
+
+Eso significa que las entidades principales estan separadas por responsabilidad:
+
+- clientes en una tabla
+- prestamos en otra
+- cuotas en otra
+- pagos en otra
+- asignaciones de pago en otra
+- politicas en otra
+
+No esta totalmente normalizada al extremo porque hay algunas decisiones pragmaticas:
+
+- se guarda loan_balances como resumen materializado de saldos
+- se guarda loan_overdue_snapshots para trazabilidad historica de mora
+
+Eso introduce una pequena desnormalizacion controlada.
+
+Por que se hace eso:
+
+- calcular saldo completo cada vez desde cero seria mas costoso
+- consultar dashboard y cartera es mas rapido con saldos precalculados
+- permite dejar evidencia del calculo de mora por fecha
+
+Beneficio:
+
+- mejor rendimiento operativo
+- menos calculo repetido
+- mejor trazabilidad financiera
+
+Costo:
+
+- hay que mantener consistencia entre tablas
+- si una funcion SQL falla o se altera mal, podria haber desalineacion entre detalle y resumen
+
+
+4. MODELO GENERAL DE NEGOCIO
+
+La estructura sigue este flujo:
+
+Organizacion
+  -> Usuarios/perfiles
+  -> Clientes
+  -> Politicas y planes
+  -> Prestamos
+      -> Cuotas
+      -> Saldos
+      -> Pagos
+          -> Asignaciones de pago
+      -> Snapshots de mora
+      -> Recordatorios
+  -> Suscripciones push
+  -> Auditoria
+
+
+5. TABLAS Y POR QUE EXISTEN
+
+5.1 organizations
+
+Que guarda:
+- cada empresa o prestamista que usa el sistema
+
+Por que existe:
+- el sistema es multi-tenant
+- todo cuelga de una organizacion
+
+Beneficio:
+- separacion fuerte de datos por negocio
+- facilita escalar a varias organizaciones en una sola instancia
+
+
+5.2 profiles
+
+Que guarda:
+- relacion entre usuario de Auth y organizacion
+- rol interno: admin o collector
+
+Por que existe:
+- Supabase Auth resuelve autenticacion
+- profiles resuelve autorizacion y pertenencia de negocio
+
+Beneficio:
+- separar login de permisos
+- usar RLS segun organization_id y role
+
+
+5.3 clients
+
+Que guarda:
+- datos del cliente
+- score simple y notas
+- estado
+
+Por que existe:
+- un cliente puede tener varios prestamos
+
+Beneficio:
+- historial por cliente
+- filtros y reportes por cartera
+
+
+5.4 loan_policies
+
+Que guarda:
+- reglas de negocio de prestamos y mora
+- politica por organizacion
+- override por prestamo
+
+Por que existe:
+- el usuario quiere reglas configurables
+- no conviene hardcodear estas reglas en frontend
+
+Beneficio:
+- flexibilidad real
+- permite personalizacion por negocio y por prestamo
+
+Tradeoff:
+- sube complejidad en las funciones SQL
+
+
+5.5 interest_plans
+
+Que guarda:
+- planes por rango de plazo y cuotas
+
+Por que existe:
+- el negocio define condiciones repetibles
+
+Beneficio:
+- agiliza creacion de prestamos
+- evita recalculo manual de interes en cada operacion
+
+
+5.6 loans
+
+Que guarda:
+- prestamo principal
+- capital, interes flat, total, estado
+- referencia al cliente
+- referencia opcional al prestamo padre en refinanciacion
+
+Por que existe:
+- es la entidad central del dominio financiero
+
+Beneficio:
+- punto unico de control del ciclo de vida del prestamo
+
+
+5.7 installments
+
+Que guarda:
+- cronograma de cuotas
+- fecha de vencimiento
+- monto, pagado, saldo, estado
+
+Por que existe:
+- el cobro y la mora se calculan sobre cuotas vencidas
+
+Beneficio:
+- control preciso por vencimiento
+- permite pagos parciales y estados detallados
+
+
+5.8 payments
+
+Que guarda:
+- cada pago registrado
+
+Por que existe:
+- todo movimiento de dinero debe existir como evento
+
+Beneficio:
+- trazabilidad financiera
+- historial auditable
+
+
+5.9 payment_allocations
+
+Que guarda:
+- como se reparte un pago entre mora, interes y capital
+
+Por que existe:
+- el pago no siempre va a una sola cosa
+- se necesita reflejar la waterfall
+
+Beneficio:
+- trazabilidad exacta del motor de pagos
+- soporte para distintas reglas de aplicacion
+
+Esto es una muy buena decision para escalabilidad funcional.
+
+
+5.10 loan_balances
+
+Que guarda:
+- saldo de capital pendiente
+- interes pendiente
+- mora pendiente
+- total pendiente
+- interes cobrado
+
+Por que existe:
+- es un resumen operativo de consulta rapida
+
+Beneficio:
+- dashboards y listados mas rapidos
+- menos joins y agregaciones costosas en lectura frecuente
+
+Riesgo:
+- si no se mantiene bien, puede desincronizarse del detalle
+
+Por eso las operaciones criticas van por RPC.
+
+
+5.11 loan_overdue_snapshots
+
+Que guarda:
+- evidencia del calculo de mora en una fecha dada
+
+Por que existe:
+- la mora no debe depender solo del frontend
+- se necesita trazabilidad del calculo
+
+Beneficio:
+- auditoria y reconstruccion de historia financiera
+
+
+5.12 reminders
+
+Que guarda:
+- recordatorios pendientes o enviados para clientes
+
+Por que existe:
+- desacoplar generacion del recordatorio del envio
+
+Beneficio:
+- modelo de cola simple
+- reintentos y trazabilidad
+
+
+5.13 reminder_logs
+
+Que guarda:
+- resultado de cada intento de envio
+
+Por que existe:
+- necesitas saber si fallo o salio bien
+
+Beneficio:
+- observabilidad del worker
+
+
+5.14 push_subscriptions
+
+Que guarda:
+- suscripciones web push de usuarios internos
+
+Por que existe:
+- el push es solo para admin/cobradores
+
+Beneficio:
+- notificaciones internas desacopladas del frontend
+
+
+5.15 audit_log
+
+Que guarda:
+- actor
+- entidad
+- accion
+- before
+- after
+- motivo
+
+Por que existe:
+- pagos, refinanciaciones y cambios de politica son sensibles
+
+Beneficio:
+- trazabilidad operativa y soporte
+- ayuda a investigar errores o fraude
+
+
+6. POR QUE SE USA organization_id EN CASI TODO
+
+Se usa para multi-tenant real.
+
+Eso permite:
+
+- aislar datos por organizacion
+- aplicar RLS estricta
+- consultar por tenant de forma eficiente
+- escalar muchas organizaciones en una misma BD
+
+Beneficio tecnico:
+
+- patron standard y robusto
+- facil de indexar
+- facil de usar con Supabase RLS
+
+
+7. RLS Y SEGURIDAD
+
+La seguridad de filas (RLS) restringe acceso por organization_id.
+
+Eso significa:
+
+- un usuario autenticado solo ve datos de su organizacion
+- aunque el frontend falle, la BD sigue protegiendo
+
+Esto es mucho mejor que confiar solo en filtros del frontend.
+
+Beneficio:
+
+- seguridad fuerte a nivel de base
+- reduce riesgo de fuga entre tenants
+
+
+8. POR QUE HAY RPC / FUNCIONES SQL
+
+Funciones clave:
+
+- create_loan_with_schedule
+- post_payment
+- compute_overdue
+- refinance_loan
+- queue_reminders
+
+Por que se usan:
+
+- los cambios de saldos y pagos son transaccionales
+- es mejor ejecutar la logica cerca de los datos
+- evita que el frontend manipule saldos directamente
+
+Beneficio:
+
+- consistencia
+- menos riesgo de errores de negocio
+- mejor punto central para reglas
+
+Costo:
+
+- mas complejidad SQL
+- debugging algo mas tecnico
+
+
+9. ESCALABILIDAD
+
+9.1 Escalable para que si
+
+La estructura es escalable para:
+
+- multiples organizaciones
+- miles de clientes por organizacion
+- muchos prestamos y cuotas
+- consultas de cartera y reportes operativos basicos
+- crecimiento razonable del producto sin rehacer el modelo principal
+
+9.2 Por que escala razonablemente
+
+- hay indices por organization_id
+- hay indices en columnas operativas clave
+- las relaciones estan bien separadas
+- hay tablas de resumen para lectura rapida
+- la logica critica esta centralizada
+
+9.3 Limites futuros
+
+Si el volumen crece mucho, habria que mejorar:
+
+- particionado por fechas o por tenant en tablas grandes
+- procesos batch mas robustos para mora y recordatorios
+- colas mas formales para jobs
+- vistas materializadas o agregados adicionales para reportes pesados
+
+Para un MVP y primeras etapas, la estructura esta bien encaminada.
+
+
+10. SQL VS NOSQL EN ESTE CASO
+
+SQL era la mejor opcion.
+
+Si se hubiera usado NoSQL:
+
+- seria mas facil guardar documentos flexibles
+- pero mas dificil mantener consistencia de saldos
+- mas dificil auditar pagos y asignaciones
+- mas dificil garantizar integridad de relaciones
+
+En prestamos, cuotas y pagos, SQL suele ser mejor por naturaleza del problema.
+
+
+11. NORMALIZADA O DESNORMALIZADA
+
+Respuesta corta:
+
+- principalmente normalizada
+- con desnormalizacion selectiva y controlada
+
+Eso es lo correcto para este tipo de sistema.
+
+Si estuviera totalmente normalizada:
+
+- todo seria mas "puro"
+- pero leer dashboards y saldos seria mas lento
+
+Si estuviera muy desnormalizada:
+
+- seria mas rapida en algunas lecturas
+- pero seria mucho mas facil romper consistencia
+
+La estructura actual busca equilibrio.
+
+
+12. BENEFICIOS DE LA ESTRUCTURA ACTUAL
+
+- buena separacion de responsabilidades
+- seguridad multi-tenant
+- trazabilidad financiera
+- soporte real para pagos parciales
+- soporte para refinanciacion
+- reglas de negocio configurables
+- base compatible con crecimiento
+
+
+13. COSTOS O DESVENTAJAS DE LA ESTRUCTURA ACTUAL
+
+- complejidad media, no es una BD trivial
+- las funciones SQL requieren cuidado
+- loan_balances necesita disciplina para no desincronizarse
+- algunos reportes avanzados requeriran optimizacion futura
+
+
+14. SI SE PUEDE ESCALAR MAS ADELANTE, COMO
+
+Se puede escalar sin rehacer el modelo central:
+
+- agregar mas indices segun consultas reales
+- separar jobs pesados del worker
+- usar colas para emails y push
+- materializar reportes
+- particionar tablas grandes
+- agregar replicas de lectura si fuera necesario
+
+La base ya tiene una estructura que soporta esa evolucion.
+
+
+15. CONCLUSION
+
+La BD esta bien orientada para un sistema financiero operativo:
+
+- SQL relacional
+- mayormente normalizada
+- desnormalizacion puntual para rendimiento
+- segura por RLS
+- escalable para un MVP serio y siguientes etapas
+
+Es una estructura correcta para este dominio.
+
+No es la mas simple posible, pero si una base mucho mas solida que una tabla unica o un enfoque improvisado.
+
