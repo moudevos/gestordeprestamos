@@ -7,7 +7,7 @@ export function ReportsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.from("loans").select("id, status, principal_amount, total_amount, clients(first_name,last_name)").then(({ data }) => {
+    supabase.from("loans").select("id, status, principal_amount, total_amount, clients(first_name,last_name)").is("deleted_at", null).then(({ data }) => {
       setRows(data ?? []);
       setLoading(false);
     });

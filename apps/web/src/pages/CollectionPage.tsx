@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { TableSkeleton } from "../components/LoadingState";
-import { showErrorAlert, showSuccessAlert, showWarningAlert } from "../lib/alerts";
+import { showErrorAlert, showSuccessToast, showWarningAlert } from "../lib/alerts";
 import { supabase } from "../lib/supabase";
 
 export function CollectionPage() {
@@ -41,7 +41,7 @@ export function CollectionPage() {
   async function load() {
     setLoading(true);
     const [{ data: loanRows }, { data: paymentRows }, { data: profile }] = await Promise.all([
-      supabase.from("loans").select("id, principal_amount, total_amount, status, clients(first_name,last_name), loan_balances(total_outstanding,penalty_outstanding)").in("status", ["active", "overdue"]),
+      supabase.from("loans").select("id, principal_amount, total_amount, status, clients(first_name,last_name), loan_balances(total_outstanding,penalty_outstanding)").is("deleted_at", null).in("status", ["active", "overdue"]),
       supabase.from("payments").select("*, loans(clients(first_name,last_name))").order("created_at", { ascending: false }).limit(100),
       supabase.from("profiles").select("organization_id").single()
     ]);
@@ -95,7 +95,7 @@ export function CollectionPage() {
       return;
     }
     await load();
-    await showSuccessAlert("Pago registrado", "El pago se guardo correctamente.");
+    await showSuccessToast("Pago registrado");
     setSubmitting(false);
   }
 

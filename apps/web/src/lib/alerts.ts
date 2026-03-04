@@ -26,6 +26,19 @@ export function showSuccessAlert(title: string, text: string) {
   });
 }
 
+export function showSuccessToast(title: string) {
+  return Swal.fire({
+    ...baseOptions,
+    toast: true,
+    position: "top-end",
+    icon: "success",
+    title,
+    timer: 1800,
+    showConfirmButton: false,
+    timerProgressBar: true
+  });
+}
+
 export function showWarningAlert(title: string, text: string) {
   return Swal.fire({
     ...baseOptions,

@@ -208,6 +208,10 @@
     word-break: break-word;
   }
 
+  .danger-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100;
+  }
+
   .input-with-icon {
     @apply flex items-center gap-3 rounded-xl border border-app-border bg-white px-4 py-3 transition focus-within:border-app-accent focus-within:ring-2 focus-within:ring-blue-100;
   }

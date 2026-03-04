@@ -1,25 +1,32 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
-import { Calculator, Eye, Percent } from "lucide-react";
+import { Calculator, Eye, Percent, Trash2, X } from "lucide-react";
 import { TableSkeleton } from "../components/LoadingState";
+import { showErrorAlert, showSuccessToast } from "../lib/alerts";
 import { supabase } from "../lib/supabase";
+
+const initialLoanForm = {
+  client_id: "",
+  principal_amount: "1000",
+  interest_pct: "10",
+  commission_amount: "0",
+  first_payment_date: new Date().toISOString().slice(0, 10),
+  frequency: "weekly",
+  installments_count: "4"
+};
 
 export function LoansPage() {
   const [clients, setClients] = useState<any[]>([]);
   const [loans, setLoans] = useState<any[]>([]);
   const [selectedLoan, setSelectedLoan] = useState<any | null>(null);
+  const [loanToDelete, setLoanToDelete] = useState<any | null>(null);
+  const [deleteReason, setDeleteReason] = useState("Prestamo duplicado");
+  const [deleteNote, setDeleteNote] = useState("");
   const [organizationId, setOrganizationId] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({
-    client_id: "",
-    principal_amount: "1000",
-    interest_pct: "10",
-    commission_amount: "0",
-    first_payment_date: new Date().toISOString().slice(0, 10),
-    frequency: "weekly",
-    installments_count: "4"
-  });
+  const [deleting, setDeleting] = useState(false);
+  const [form, setForm] = useState(initialLoanForm);
 
   const principal = Number(form.principal_amount) || 0;
   const interestPct = Number(form.interest_pct) || 0;
@@ -33,7 +40,7 @@ export function LoansPage() {
       supabase.from("clients").select("id, first_name, last_name").is("deleted_at", null),
       supabase.from("loans").select(
         "*, clients(first_name,last_name,phone,score_value), loan_balances(total_outstanding,principal_outstanding,interest_outstanding,penalty_outstanding,interest_collected), installments(id,status,remaining_amount), payments(id,amount,paid_at)"
-      ),
+      ).is("deleted_at", null).order("created_at", { ascending: false }),
       supabase.from("profiles").select("organization_id").single()
     ]);
     setClients(clientRows ?? []);
@@ -49,7 +56,7 @@ export function LoansPage() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    await supabase.rpc("create_loan_with_schedule", {
+    const { error } = await supabase.rpc("create_loan_with_schedule", {
       params: {
         organization_id: organizationId,
         client_id: form.client_id,
@@ -62,8 +69,47 @@ export function LoansPage() {
         installments_count: Number(form.installments_count)
       }
     });
+
+    if (error) {
+      await showErrorAlert("No se pudo crear el prestamo", error.message);
+      setSubmitting(false);
+      return;
+    }
+
+    setForm({
+      ...initialLoanForm,
+      first_payment_date: new Date().toISOString().slice(0, 10)
+    });
     await load();
+    await showSuccessToast("Prestamo creado");
     setSubmitting(false);
+  }
+
+  async function deleteLoan() {
+    if (!loanToDelete) return;
+    setDeleting(true);
+    const { error } = await supabase.rpc("delete_loan_with_reason", {
+      params: {
+        organization_id: organizationId,
+        loan_id: loanToDelete.id,
+        reason: deleteReason,
+        note: deleteReason === "Otro" ? deleteNote : deleteNote || null
+      }
+    });
+
+    if (error) {
+      await showErrorAlert("No se pudo eliminar", error.message);
+      setDeleting(false);
+      return;
+    }
+
+    setLoanToDelete(null);
+    setSelectedLoan(null);
+    setDeleteReason("Prestamo duplicado");
+    setDeleteNote("");
+    await load();
+    await showSuccessToast("Prestamo eliminado");
+    setDeleting(false);
   }
 
   const detailPaid = selectedLoan
@@ -191,6 +237,10 @@ export function LoansPage() {
                         <Eye size={16} strokeWidth={2} />
                         Ver
                       </button>
+                      <button type="button" className="ghost-button danger-button" onClick={() => setLoanToDelete(loan)}>
+                        <Trash2 size={16} strokeWidth={2} />
+                        Eliminar
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -209,7 +259,9 @@ export function LoansPage() {
                   {selectedLoan.clients?.first_name} {selectedLoan.clients?.last_name} {selectedLoan.clients?.phone ? `· ${selectedLoan.clients.phone}` : ""}
                 </span>
               </div>
-              <button type="button" className="ghost-button" onClick={() => setSelectedLoan(null)}>Cerrar</button>
+              <button type="button" className="icon-close-button" onClick={() => setSelectedLoan(null)} aria-label="Cerrar modal">
+                <X size={18} strokeWidth={2.4} />
+              </button>
             </div>
 
             <div className="quick-badges">
@@ -245,6 +297,44 @@ export function LoansPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {loanToDelete && (
+        <div className="modal-backdrop" onClick={() => setLoanToDelete(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="quick-summary-header">
+              <h2 className="section-title">Eliminar prestamo</h2>
+              <button type="button" className="icon-close-button" onClick={() => setLoanToDelete(null)} aria-label="Cerrar modal">
+                <X size={18} strokeWidth={2.4} />
+              </button>
+            </div>
+            <div className="stack">
+              <p className="helper-text">Al eliminarlo se ocultara del sistema y se revertira su impacto en caja y ganancia.</p>
+              <div className="quick-badges">
+                <span className="data-chip">{loanToDelete.clients?.first_name} {loanToDelete.clients?.last_name}</span>
+                <span className="data-chip">S/ {Number(loanToDelete.total_amount ?? 0).toFixed(2)}</span>
+              </div>
+              <label className="input-group">
+                <span className="input-label">Motivo</span>
+                <select value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)}>
+                  <option value="Prestamo duplicado">Prestamo duplicado</option>
+                  <option value="Prestamo errado">Prestamo errado</option>
+                  <option value="Cliente equivocado">Cliente equivocado</option>
+                  <option value="Otro">Otro</option>
+                </select>
+              </label>
+              <label className="input-group">
+                <span className="input-label">Detalle</span>
+                <input value={deleteNote} onChange={(e) => setDeleteNote(e.target.value)} placeholder="Detalle opcional del motivo" />
+              </label>
+              <div className="modal-actions">
+                <button type="button" className="ghost-button" onClick={() => setLoanToDelete(null)}>Cancelar</button>
+                <button type="button" className="danger-button" onClick={deleteLoan} disabled={deleting}>
+                  {deleting ? "Eliminando..." : "Eliminar prestamo"}
+                </button>
               </div>
             </div>
           </div>
