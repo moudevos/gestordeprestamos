@@ -74,68 +74,26 @@ export function SetupOrganizationPage({ userId, userEmail, onCompleted }: SetupO
     setIsSubmitting(true);
     setManualSql("");
 
-    const { data: organization, error: organizationError } = await supabase
-      .from("organizations")
-      .insert({
-        name: companyName.trim(),
+    const { data, error } = await supabase.rpc("bootstrap_organization", {
+      params: {
+        user_id: userId,
+        email: userEmail,
+        company_name: companyName.trim(),
         currency_code: currencyCode,
         timezone,
-        accent_color: accentColor
-      })
-      .select("id, name, currency_code, timezone, accent_color")
-      .single();
-
-    if (organizationError || !organization) {
-      const sql = fallbackSql;
-      setManualSql(sql);
-      await showErrorAlert("No se pudo crear la empresa", organizationError?.message ?? "Tu base aun no permite este alta desde frontend.");
-      setIsSubmitting(false);
-      return;
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .insert({
-        user_id: userId,
-        organization_id: organization.id,
-        role: "admin",
-        full_name: fullName.trim() || userEmail,
-        phone: phone.trim() || null
-      })
-      .select("*")
-      .single();
-
-    if (profileError || !profile) {
-      const sql = fallbackSql;
-      setManualSql(sql);
-      await showErrorAlert("Empresa creada, perfil pendiente", profileError?.message ?? "Crea el perfil manualmente desde Supabase.");
-      setIsSubmitting(false);
-      return;
-    }
-
-    const { error: policyError } = await supabase.from("loan_policies").insert({
-      organization_id: organization.id,
-      scope: "organization_default",
-      policy_name: "Politica general",
-      interest_mode: "flat_pct",
-      interest_flat_pct: 20,
-      interest_flat_amount: 0,
-      commission_amount: 0,
-      daily_overdue_pct: 2,
-      overdue_base: "saldo_vencido_total",
-      overdue_start_rule: "next_day",
-      overdue_cap_type: "amount",
-      overdue_cap_value: 0,
-      payment_waterfall: "penalty_interest_capital",
-      allow_partial_payments: true,
-      allow_refinance_after_interest_paid: true
+        accent_color: accentColor,
+        full_name: fullName.trim(),
+        phone: phone.trim()
+      }
     });
 
-    if (policyError) {
-      await showErrorAlert("Perfil creado, politica pendiente", policyError.message);
-      setManualSql(fallbackSql);
+    const profile = data?.[0] ?? data;
+
+    if (error || !profile) {
+      const sql = fallbackSql;
+      setManualSql(sql);
+      await showErrorAlert("No se pudo crear la empresa", error?.message ?? "Tu base aun no permite este alta desde frontend.");
       setIsSubmitting(false);
-      onCompleted(profile);
       return;
     }
 
